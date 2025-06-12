@@ -6,21 +6,29 @@ import time
 from collections import deque
 import matplotlib.pyplot as plt
 
-UDP_IP = "0.0.0.0"      # слушать на всех интерфейсах
-UDP_PORT = 5005         # тот же порт, что в скетче ESP32
+UDP_IP = "0.0.0.0"
+UDP_PORT = 5005
+FPS_AVERAGE_INTERVAL_SEC = 2
 
-FPS_AVERAGE_INTERVAL_SEC = 2  # <-- Вынесено в конфиг: интервал для расчёта среднего FPS
-
-# Буфер для сборки кадров
 frame_buffer = {}
 frame_info = {}
+frame_last_update = {}
+FRAME_TIMEOUT_SEC = 1.0  # Таймаут хранения "недособранных" кадров
+
+def clean_old_frames():
+    """Удаляет старые или зависшие кадры из буфера"""
+    now = time.time()
+    old_ids = [fid for fid, ts in frame_last_update.items() if now - ts > FRAME_TIMEOUT_SEC]
+    for fid in old_ids:
+        frame_buffer.pop(fid, None)
+        frame_info.pop(fid, None)
+        frame_last_update.pop(fid, None)
 
 def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(5.0)
 
-    prev_frame_id = None
     prev_time = None
     frame_times = deque(maxlen=6000)
     frametimes_plot = deque(maxlen=200)
@@ -37,34 +45,40 @@ def main():
     print(f"Listening UDP {UDP_PORT}...")
 
     while True:
+        clean_old_frames()
         try:
             data, addr = sock.recvfrom(1500)
         except socket.timeout:
             print("Timeout, no packets received")
             continue
 
-        # Разбор заголовка (16 байт)
         if len(data) < 16:
             continue
-        frame_id, packet_id, num_packets, datalen, frame_len, _ = struct.unpack('<IHHHIH', data[:16])
+        try:
+            frame_id, packet_id, num_packets, datalen, frame_len, _ = struct.unpack('<IHHHIH', data[:16])
+        except struct.error:
+            continue
         payload = data[16:]
 
         if len(payload) != datalen:
+            continue
+        if num_packets == 0 or packet_id >= num_packets:
             continue
 
         # Инициализация буфера для кадра
         if frame_id not in frame_buffer:
             frame_buffer[frame_id] = [None] * num_packets
             frame_info[frame_id] = {'size': frame_len, 'packets': num_packets, 'recv': 0}
+        frame_last_update[frame_id] = time.time()
 
-        # Сохраняем пакет
+        # Сохраняем пакет (дубли не учитываем)
         if frame_buffer[frame_id][packet_id] is None:
             frame_buffer[frame_id][packet_id] = payload
             frame_info[frame_id]['recv'] += 1
 
         # Проверяем, собран ли кадр полностью
         if frame_info[frame_id]['recv'] == frame_info[frame_id]['packets']:
-            jpg_bytes = b''.join(frame_buffer[frame_id])
+            jpg_bytes = b''.join(filter(None, frame_buffer[frame_id]))
             if len(jpg_bytes) == frame_info[frame_id]['size']:
                 frame = cv2.imdecode(np.frombuffer(jpg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if frame is not None:
@@ -74,7 +88,6 @@ def main():
                         frametime = (now - prev_time) * 1000.0
                         frametimes_plot.append(frametime)
                     prev_time = now
-                    # Учитываем только кадры за FPS_AVERAGE_INTERVAL_SEC секунд
                     while frame_times and now - frame_times[0] > FPS_AVERAGE_INTERVAL_SEC:
                         frame_times.popleft()
                     elapsed = (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 1
@@ -89,11 +102,12 @@ def main():
                         ax.set_xlim(0, len(frametimes_plot))
                         fig.canvas.draw()
                         fig.canvas.flush_events()
-                    if cv2.waitKey(1) == 27:  # ESC
+                    if cv2.waitKey(1) == 27:
                         break
-                # Чистим старые кадры
-                del frame_buffer[frame_id]
-                del frame_info[frame_id]
+            # Чистим кадр (успешно или неуспешно)
+            frame_buffer.pop(frame_id, None)
+            frame_info.pop(frame_id, None)
+            frame_last_update.pop(frame_id, None)
 
     cv2.destroyAllWindows()
     plt.ioff()
