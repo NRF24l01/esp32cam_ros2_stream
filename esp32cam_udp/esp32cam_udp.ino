@@ -1,17 +1,12 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiUdp.h>
+#include "config.h"
 
-// ====== Настройки WiFi и UDP =======
-const char* ssid = "robotx";
-const char* password = "78914040";
-const char* udp_host = "192.168.0.21";
-const uint16_t udp_port = 5005;
-
+// Настройки камеры (не трогать)
 #define CAMERA_FRAME_SIZE    FRAMESIZE_VGA
 #define CAMERA_JPEG_QUALITY  12
 #define CAMERA_QUEUE_SIZE    2
-
-#define DEBUG_INTERVAL_MS    2000
 
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
@@ -33,12 +28,43 @@ const uint16_t udp_port = 5005;
 WiFiUDP udp;
 QueueHandle_t frame_queue;
 
+// Тип кадра
 typedef struct {
   uint8_t* buf;
   size_t len;
   uint32_t id;
-  // ... временные метки (опционально)
 } jpg_frame_t;
+
+// ====== Сериал обработчик =======
+void printHelp() {
+  Serial.println(F("{\"help\":\"Send: ssid|password|host|port, example: mywifi|pass123|192.168.1.2|5005\"}"));
+}
+
+void checkSerialInput() {
+  static String input;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      input.trim();
+      if (input.length() > 0) {
+        String err;
+        if (camConfig.parseAndSet(input, err)) {
+          camConfig.save();
+          Serial.println(F("{\"msg\":\"config_saved\",\"reboot\":true}"));
+          delay(300);
+          ESP.restart();
+        } else {
+          Serial.println("{\"error\":\"" + err + "\"}");
+          printHelp();
+        }
+      }
+      input = "";
+    } else {
+      input += c;
+    }
+  }
+}
 
 // ====== Ядро 0: захват + препроцессинг ======
 void camera_and_preproc_task(void* arg) {
@@ -89,7 +115,7 @@ void udp_task(void* arg) {
         uint16_t reserved = 0;
         memcpy(header +14, &reserved, 2);
 
-        udp.beginPacket(udp_host, udp_port);
+        udp.beginPacket(camConfig.udp_host.c_str(), camConfig.udp_port);
         udp.write(header, sizeof(header));
         udp.write(jpg->buf + offset, chunk);
         udp.endPacket();
@@ -98,7 +124,6 @@ void udp_task(void* arg) {
         packet_id++;
         delayMicroseconds(250);
       }
-      // Освободить память только этого кадра!
       free(jpg->buf); free(jpg);
     }
     taskYIELD();
@@ -107,6 +132,13 @@ void udp_task(void* arg) {
 
 void setup() {
   Serial.begin(115200);
+
+  // Дефолтные значения
+  camConfig.ssid = "robotx";
+  camConfig.password = "78914040";
+  camConfig.udp_host = "192.168.10.139";
+  camConfig.udp_port = 5005;
+  camConfig.load();
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -143,24 +175,26 @@ void setup() {
   while (esp_camera_init(&config) != ESP_OK) {
     Serial.println("Camera init failed");
     delay(1000);
+    ESP.restart();
   }
   Serial.println("Camera init OK");
 
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
+  WiFi.begin(camConfig.ssid.c_str(), camConfig.password.c_str());
+  Serial.print("{\"msg\":\"wifi_connecting\",\"ssid\":\"" + camConfig.ssid + "\"}");
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500); Serial.print(".");
+    delay(500);
+    checkSerialInput();
   }
-  Serial.println("\nWiFi connected");
-  Serial.print("ESP32 IP: "); Serial.println(WiFi.localIP());
+  Serial.println("{\"msg\":\"wifi_connected\",\"ip\":\"" + WiFi.localIP().toString() + "\"}");
 
   udp.begin(random(1024, 65535));
   frame_queue = xQueueCreate(CAMERA_QUEUE_SIZE, sizeof(jpg_frame_t*));
 
-  xTaskCreatePinnedToCore(camera_and_preproc_task, "camera_preproc", 4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(camera_and_preproc_task, "camera_preproc", 8196, NULL, 2, NULL, 0);
   xTaskCreatePinnedToCore(udp_task, "udp_task", 4096, NULL, 2, NULL, 1);
 }
 
 void loop() {
-  delay(1000);
+  checkSerialInput();
+  delay(100);
 }
