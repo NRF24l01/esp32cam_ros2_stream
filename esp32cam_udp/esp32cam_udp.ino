@@ -119,7 +119,7 @@ void udp_task(void* arg) {
         udp.write(header, sizeof(header));
         udp.write(jpg->buf + offset, chunk);
         udp.endPacket();
-
+        
         offset += chunk;
         packet_id++;
         delayMicroseconds(250);
@@ -186,6 +186,7 @@ void setup() {
     checkSerialInput();
   }
   Serial.println("{\"msg\":\"wifi_connected\",\"ip\":\"" + WiFi.localIP().toString() + "\"}");
+  Serial.println(String("{\"msg\":\"sending_to\",\"ip\":\"") + camConfig.udp_host + "\"}");
 
   udp.begin(random(1024, 65535));
   frame_queue = xQueueCreate(CAMERA_QUEUE_SIZE, sizeof(jpg_frame_t*));
