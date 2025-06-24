@@ -33,5 +33,5 @@ colcon build --packages-select esp32listener
 ```
 - Запуск
 ```shell
-ros2 run esp32listener esp32listener
+ros2 run esp32listener esp32listener --ros-args -p esp_ip:=<esp32cam ip>
 ```
