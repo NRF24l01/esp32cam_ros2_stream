@@ -3,8 +3,6 @@
 struct CamConfig {
   String ssid;
   String password;
-  String udp_host;
-  uint16_t udp_port;
 
   void load();
   void save();
