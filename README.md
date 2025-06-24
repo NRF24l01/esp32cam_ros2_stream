@@ -32,6 +32,8 @@ pip install -r requirements.txt
 ```shell
 python3 test_run.py
 ```
+![test window example](images/test_window.jpg)
+
 ##### Запуск ноды
 - Собрать пакет
 ```shell
@@ -41,6 +43,9 @@ colcon build --packages-select esp32listener
 ```shell
 ros2 run esp32listener esp32listener --ros-args -p esp_ip:=<esp32cam ip>
 ```
+
+- Теперь можно добавить в rviz2 топик `image_raw`
+![RVIZ example](images/test_rviz.jpg)
 
 ##### Индикация ошибок
 - В случае если светодиод на плате(вспышка на 4ом пине) включается больше чем на секунду, то наиболее вероятно произошла ошибка инициализации камеры, и рекомендуется:
