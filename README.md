@@ -1,10 +1,9 @@
-# ESP32 CAM стрим в топик ROS2 jazzy
+# ESP32 CAM [rosik](https://github.com/stepanburmistrov/ROSik) addon
 
 ![ESP32-CAM Example](images/esp32cam_example.png)
 
 
-## Минимальная конфигурация
-### Нужно:
+### Требуется:
 - ПК с ros2 jazzy
 - WiFi роутер
 - Esp32Cam, *ai-thinker esp32-cam, как на картинке выше*
